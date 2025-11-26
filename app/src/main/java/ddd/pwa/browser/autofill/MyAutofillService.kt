@@ -1,15 +1,11 @@
 package ddd.pwa.browser.autofill
 
 import android.app.assist.AssistStructure
-import android.app.assist.AssistStructure.ViewNode
 import android.service.autofill.*
-import android.view.autofill.AutofillId
-import android.view.autofill.AutofillValue
 import android.os.CancellationSignal
-import android.content.Intent
 import android.util.Log
+import android.view.autofill.AutofillValue
 import android.widget.RemoteViews
-import android.widget.Toast
 import ddd.pwa.browser.R
 
 class MyAutofillService : AutofillService() {
@@ -21,22 +17,20 @@ class MyAutofillService : AutofillService() {
         cancellationSignal: CancellationSignal,
         callback: FillCallback
     ) {
-        // 检查 Android 版本
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
+        Log.d(TAG, "Fill request received")
+        
+        val contexts = request.fillContexts
+        if (contexts.isEmpty()) {
             callback.onSuccess(null)
             return
         }
         
-        val structure = request.fillContexts.last().structure
-        val parser = StructureParser(structure)
-        parser.parse()
-        
-        val structure = request.fillContexts.last().structure
+        val context = contexts.last()
+        val structure = context.structure
         val parser = StructureParser(structure)
         parser.parse()
         
         val dataset = buildDataset(parser)
-        
         if (dataset != null) {
             val response = FillResponse.Builder()
                 .addDataset(dataset)
@@ -48,13 +42,7 @@ class MyAutofillService : AutofillService() {
     }
     
     override fun onSaveRequest(request: SaveRequest, callback: SaveCallback) {
-        val structure = request.fillContexts.last().structure
-        val parser = StructureParser(structure)
-        parser.parse()
-        
-        // 这里可以保存用户输入的凭据
-        Log.d(TAG, "Save credentials for: ${parser.webDomain}")
-        Toast.makeText(this, "密码已保存", Toast.LENGTH_SHORT).show()
+        Log.d(TAG, "Save request received")
         callback.onSuccess()
     }
     
@@ -62,32 +50,45 @@ class MyAutofillService : AutofillService() {
         val usernameField = parser.usernameField
         val passwordField = parser.passwordField
         
+        // 检查字段是否有效
         if (usernameField == null || passwordField == null) {
             return null
         }
         
-        // 创建填充数据集
-        val datasetBuilder = Dataset.Builder()
+        val usernameId = usernameField.autofillId
+        val passwordId = passwordField.autofillId
         
-        // 用户名填充
-        val usernamePresentation = RemoteViews(packageName, R.layout.autofill_item)
-        usernamePresentation.setTextViewText(R.id.text, "填充用户名")
-        datasetBuilder.setValue(
-            usernameField.autofillId,
-            AutofillValue.forText("example_user"),
-            usernamePresentation
-        )
+        // 确保 AutofillId 不为空
+        if (usernameId == null || passwordId == null) {
+            return null
+        }
         
-        // 密码填充
-        val passwordPresentation = RemoteViews(packageName, R.layout.autofill_item)
-        passwordPresentation.setTextViewText(R.id.text, "填充密码")
-        datasetBuilder.setValue(
-            passwordField.autofillId,
-            AutofillValue.forText("example_password"),
-            passwordPresentation
-        )
-        
-        return datasetBuilder.build()
+        return try {
+            val datasetBuilder = Dataset.Builder()
+            
+            // 用户名填充
+            val usernamePresentation = RemoteViews(packageName, android.R.layout.simple_list_item_1)
+            usernamePresentation.setTextViewText(android.R.id.text1, "填充用户名")
+            datasetBuilder.setValue(
+                usernameId,
+                AutofillValue.forText("example_user"),
+                usernamePresentation
+            )
+            
+            // 密码填充
+            val passwordPresentation = RemoteViews(packageName, android.R.layout.simple_list_item_1)
+            passwordPresentation.setTextViewText(android.R.id.text1, "填充密码")
+            datasetBuilder.setValue(
+                passwordId,
+                AutofillValue.forText("example_password"),
+                passwordPresentation
+            )
+            
+            datasetBuilder.build()
+        } catch (e: Exception) {
+            Log.e(TAG, "Build dataset failed", e)
+            null
+        }
     }
 }
 
@@ -100,32 +101,39 @@ class StructureParser(private val structure: AssistStructure) {
         val windowNodes = structure.windowNodeCount
         for (i in 0 until windowNodes) {
             val node = structure.getWindowNodeAt(i)
-            parseLocked(node.rootViewNode)
+            parseViewNode(node.rootViewNode)
         }
     }
     
-    private fun parseLocked(node: AssistStructure.ViewNode) {
-        // 检查当前节点是否为输入字段
-        when {
-            node.htmlInfo?.attributes?.any { attr -> 
-                attr.first == "type" && attr.second == "password"
-            } == true -> {
-                passwordField = node
+    private fun parseViewNode(node: AssistStructure.ViewNode) {
+        // 检查 HTML 属性
+        node.htmlInfo?.attributes?.forEach { attr ->
+            when {
+                attr.first == "type" && attr.second == "password" -> {
+                    passwordField = node
+                }
+                attr.first == "type" && (attr.second == "text" || attr.second == "email") -> {
+                    usernameField = node
+                }
             }
-            node.autofillHints?.contains("username") == true ||
-            node.htmlInfo?.attributes?.any { attr -> 
-                attr.first == "type" && (attr.second == "text" || attr.second == "email")
-            } == true -> {
-                usernameField = node
+        }
+        
+        // 检查自动填充提示
+        node.autofillHints?.forEach { hint ->
+            when (hint) {
+                "username", "email" -> usernameField = node
+                "password" -> passwordField = node
             }
-            node.webDomain != null -> {
-                webDomain = node.webDomain
-            }
+        }
+        
+        // 获取网页域名
+        if (node.webDomain != null) {
+            webDomain = node.webDomain
         }
         
         // 递归遍历子节点
         for (i in 0 until node.childCount) {
-            parseLocked(node.getChildAt(i))
+            parseViewNode(node.getChildAt(i))
         }
     }
 }
