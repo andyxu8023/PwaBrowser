@@ -1,90 +1,72 @@
-name: Android CI
+name: Android CI - Debug Build
 
 # 触发器
 on:
   push:
-    tags:
-      - v*
+    branches: [ main, master ]
   pull_request:
-    tags:
-      - v*
+    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 设置jdk环境为1.8
+    
     steps:
-      - uses: actions/checkout@v2
-      - name: set up JDK 11
-        uses: actions/setup-java@v1
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
         with:
-          java-version: 11
-      # 获取打包秘钥
-      - name: Checkout Android Keystore
-        uses: actions/checkout@v2
+          java-version: '11'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # 打包Debug版本
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug
+
+      # 上传Debug APK到Artifacts
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
         with:
-          repository: cikezhu/android-keystore
-          token: ${{ secrets.TOKEN }} # 连接仓库的token,需要单独配置
-          path: keystore # 仓库的根目录名
-      # 获取上一次的TAG
-      - name: Get commit messages
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+      # 可选：上传到Release（如果打tag时）
+      - name: Get Version Name
+        if: startsWith(github.ref, 'refs/tags/')
+        id: get-version
         run: |
-          oldCommit=$(git rev-list --tags --skip=1 --max-count=1)
-          oldTag=$(git describe --tags --abbrev=0 $oldCommit)
-          echo "Commit old_TAG: $oldTag"
-          echo "old_tag=$oldTag" >> $GITHUB_OUTPUT
-      # 生成更新日志
-      - name: Generate changelog
-        id: changelog
-        uses: metcalfc/changelog-generator@v4.3.1
-        with:
-          myToken: ${{ secrets.GITHUB_TOKEN }}
-          base-ref: ${{ steps.modified.outputs.old_tag }}
-      # 打包release
-      - name: Build with Gradle
-        run: bash ./gradlew assembleRelease
-      # 创建release
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
       - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
         id: create_release
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          #GitHub 会自动创建 GITHUB_TOKEN 密码以在工作流程中使用。
-          #您可以使用 GITHUB_TOKEN 在工作流程运行中进行身份验证。
-          #当您启用 GitHub Actions 时，GitHub 在您的仓库中安装 GitHub 应用程序。
-          #GITHUB_TOKEN 密码是一种 GitHub 应用程序 安装访问令牌。
-          #您可以使用安装访问令牌代表仓库中安装的 GitHub 应用程序 进行身份验证。
-          #令牌的权限仅限于包含您的工作流程的仓库。 更多信息请参阅“GITHUB_TOKEN 的权限”。
-          #在每个作业开始之前， GitHub 将为作业提取安装访问令牌。 令牌在作业完成后过期。
         with:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
-          body: ${{ steps.changelog.outputs.changelog }}
           draft: false
           prerelease: false
-      # 获取apk版本号
-      - name: Get Version Name
-        uses: actions/github-script@v3
-        id: get-version
-        with:
-          script: |
-            const str=process.env.GITHUB_REF;
-            return str.substring(str.indexOf("v"));
-          result-encoding: string
-      # 上传至release的资源
-      - name: Upload Release Asset
-        id: upload-release-asset
+
+      - name: Upload Debug APK to Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }} # 上传网址，无需改动
-          asset_path: app/build/outputs/apk/release/app-release.apk # 上传路径
-          asset_name: PwaBrowser-${{steps.get-version.outputs.result}}.apk # 资源名
-          asset_content_type: application/vnd.android.package-archiv #资源类型
-      # 存档打包的文件
-      - name: Archive production artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          name: build
-          path: app/build/outputs #将打包之后的文件全部上传（里面会有混淆的map文件）
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: app/build/outputs/apk/debug/app-debug.apk
+          asset_name: PwaBrowser-${{ steps.get-version.outputs.version }}-debug.apk
+          asset_content_type: application/vnd.android.package-archive
