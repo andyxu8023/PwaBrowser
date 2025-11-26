@@ -1,5 +1,6 @@
 package ddd.pwa.browser.autofill
 
+import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
@@ -14,9 +15,8 @@ class AutofillSettingsActivity : AppCompatActivity() {
         
         val enableButton: Button = findViewById(R.id.enable_autofill)
         enableButton.setOnClickListener {
-            val intent = Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE).apply {
-                data = android.net.Uri.parse("package:$packageName")
-            }
+            val intent = Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE)
+            intent.data = android.net.Uri.parse("package:$packageName")
             startActivity(intent)
         }
     }
