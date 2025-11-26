@@ -352,6 +352,14 @@ class WebViewActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun initializeWebView() {
+        // 启用自动填充
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            myWebView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
+        }
+    
+        // 配置 WebView 支持自动填充
+        settings.saveFormData = true
+    
         // 绑定组件 应用背景色和图标
         myWebView = findViewById(R.id.webview_ding)
         myWebView.setBackgroundColor(bgColor)
