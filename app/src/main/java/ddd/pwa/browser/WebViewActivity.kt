@@ -358,7 +358,7 @@ class WebViewActivity : AppCompatActivity() {
         }
     
         // 配置 WebView 支持自动填充
-        settings.saveFormData = true
+        myWebView.settings.saveFormData = true
     
         // 绑定组件 应用背景色和图标
         myWebView = findViewById(R.id.webview_ding)
