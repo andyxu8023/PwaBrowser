@@ -1,11 +1,13 @@
 package ddd.pwa.browser.autofill
 
 import android.app.assist.AssistStructure
-import android.content.Intent
-import android.os.CancellationSignal
+import android.app.assist.AssistStructure.ViewNode
 import android.service.autofill.*
-import android.util.Log
 import android.view.autofill.AutofillId
+import android.view.autofill.AutofillValue
+import android.os.CancellationSignal
+import android.content.Intent
+import android.util.Log
 import android.widget.RemoteViews
 import android.widget.Toast
 import ddd.pwa.browser.R
@@ -19,6 +21,16 @@ class MyAutofillService : AutofillService() {
         cancellationSignal: CancellationSignal,
         callback: FillCallback
     ) {
+        // 检查 Android 版本
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
+            callback.onSuccess(null)
+            return
+        }
+        
+        val structure = request.fillContexts.last().structure
+        val parser = StructureParser(structure)
+        parser.parse()
+        
         val structure = request.fillContexts.last().structure
         val parser = StructureParser(structure)
         parser.parse()
