@@ -30,73 +30,45 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
       
-      # 使用 JDK 11，因为大多数 Android 项目需要它
-      - name: Setup JDK 11
+      # 使用 Java 17 以满足新版 Android SDK 的要求
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '11'
+          java-version: '17'
           distribution: 'temurin'
       
-      # 使用正确的包名格式
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platform-tools
-            platforms;android-31
-            build-tools;31.0.0
-          cmdline-tools-version: 'latest'
-      
-      - name: Verify Android SDK installation
+      - name: Setup Android SDK (no action needed)
         run: |
-          echo "Android SDK 路径: $ANDROID_HOME"
-          echo "已安装的包:"
-          ls -la $ANDROID_HOME/platforms/
-          ls -la $ANDROID_HOME/build-tools/
+          # GitHub Actions runner 已经预装了 Android SDK
+          echo "使用预装的 Android SDK"
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
       
-      - name: Create local.properties
+      - name: Fix code for Java 17 compatibility
         run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "创建 local.properties 完成"
-      
-      - name: Fix code compilation errors
-        run: |
-          echo "=== 修复编译错误 ==="
+          echo "=== 修复代码兼容性问题 ==="
           
-          # 修复第一个错误：IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT
-          # 这个常量在较新的 Android API 中可用，但我们可以使用替代方案
           FILE="app/src/main/java/ddd/pwa/browser/WebViewActivity.kt"
           
           if [ -f "$FILE" ]; then
-            echo "修复第 443 行..."
-            # 将 IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT 替换为兼容的常量
-            sed -i '443s/IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT/View.IMPORTANT_FOR_AUTOFILL_AUTO/g' "$FILE" || \
-            sed -i '443s/IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT/View.IMPORTANT_FOR_AUTOFILL_YES/g' "$FILE" || \
-            sed -i '443s/View.IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT/View.IMPORTANT_FOR_AUTOFILL_AUTO/g' "$FILE"
+            echo "修复第 443 行: IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT"
+            # 替换为正确的常量
+            sed -i '443s/IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT/View.IMPORTANT_FOR_AUTOFILL_AUTO/g' "$FILE"
             
-            echo "修复第 476 行..."
-            # 将 nextAutofillId() 改为 nextAutofillId
+            echo "修复第 476 行: nextAutofillId()"
+            # 将方法调用改为属性访问
             sed -i '476s/nextAutofillId()/nextAutofillId/g' "$FILE"
             
-            echo "修复后的相关行："
-            sed -n '440,480p' "$FILE"
-          fi
-      
-      - name: Build debug APK
-        run: |
-          echo "开始构建..."
-          ./gradlew assembleDebug --stacktrace
-      
-      - name: Check build output
-        run: |
-          echo "检查构建结果..."
-          if [ -d "app/build/outputs/apk/debug" ]; then
-            echo "找到 APK 文件:"
-            ls -lh app/build/outputs/apk/debug/
+            echo "修复完成"
           else
-            echo "未找到 APK 文件，查看构建输出..."
-            find . -name "*.apk" -type f 2>/dev/null || echo "未找到任何 APK 文件"
+            echo "警告: 未找到 $FILE"
+            # 尝试在其他位置查找
+            find . -name "*.kt" -type f | xargs grep -l "IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT" || true
           fi
+      
+      - name: Try to build
+        run: |
+          echo "尝试构建..."
+          ./gradlew assembleDebug --stacktrace
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
