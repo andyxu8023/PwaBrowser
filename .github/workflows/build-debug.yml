@@ -27,7 +27,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Make gradlew executable
+      - name: Fix gradlew permissions
         run: chmod +x gradlew
       
       - name: Setup JDK 11
@@ -36,11 +36,48 @@ jobs:
           java-version: '11'
           distribution: 'temurin'
       
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Patch build.gradle to use lower API
+        run: |
+          echo "=== 修复 API 兼容性问题 ==="
+          
+          # 查找并修改 app/build.gradle 或 app/build.gradle.kts
+          if [ -f "app/build.gradle" ]; then
+            echo "找到 app/build.gradle，修改中..."
+            # 备份原文件
+            cp app/build.gradle app/build.gradle.backup
+            
+            # 修改 compileSdkVersion 和 targetSdkVersion 为 31
+            sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 31/g' app/build.gradle
+            sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 31/g' app/build.gradle
+            
+            echo "修改后的 build.gradle 内容："
+            head -50 app/build.gradle
+          elif [ -f "app/build.gradle.kts" ]; then
+            echo "找到 app/build.gradle.kts，修改中..."
+            cp app/build.gradle.kts app/build.gradle.kts.backup
+            sed -i 's/compileSdkVersion([0-9]*)/compileSdkVersion(31)/g' app/build.gradle.kts
+            sed -i 's/targetSdkVersion([0-9]*)/targetSdkVersion(31)/g' app/build.gradle.kts
+          else
+            echo "未找到 build.gradle 文件"
+          fi
+      
+      - name: Install Android SDK 31
+        run: |
+          # 设置 Android SDK 环境变量
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH" >> $GITHUB_ENV
+          
+          # 安装 Android SDK 31
+          yes | sdkmanager --install "platforms;android-31"
+          yes | sdkmanager --install "build-tools;31.0.0"
+      
+      - name: Build APK
+        run: |
+          echo "开始构建..."
+          ./gradlew assembleDebug --stacktrace
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: android-debug-apk
+          name: debug-apk
           path: app/build/outputs/apk/debug/*.apk
