@@ -30,23 +30,28 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
       
-      - name: Setup JDK 11
+      # 使用 JDK 17，因为新的 Android SDK 需要它
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '11'
+          java-version: '17'
           distribution: 'temurin'
       
+      # 使用正确的参数格式
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 31  # 使用较稳定的 API 31
-          build-tools-version: 31.0.0
-          ndk-version: 21.4.7075529  # 可选的 NDK 版本
+          packages: |
+            platform-tools
+            platforms;android-33
+            build-tools;33.0.0
+            cmdline-tools;latest
+          cmdline-tools-version: 'latest'
+          accept-android-sdk-licenses: true
       
       - name: Create local.properties
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "ndk.dir=$ANDROID_HOME/ndk/21.4.7075529" >> local.properties
           echo "创建 local.properties 完成"
       
       - name: Fix Autofill API issues
