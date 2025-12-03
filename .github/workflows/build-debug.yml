@@ -27,7 +27,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Make gradlew executable
+      - name: Setup
         run: chmod +x gradlew
       
       - name: Setup Java 17
@@ -36,168 +36,35 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
       
-      - name: Comprehensive code fix
+      - name: Complete code fix
         run: |
-          echo "=== 全面修复代码问题 ==="
+          echo "执行完整修复..."
           
           FILE="app/src/main/java/ddd/pwa/browser/WebViewActivity.kt"
           
-          if [ -f "$FILE" ]; then
-            echo "备份原文件..."
-            cp "$FILE" "${FILE}.backup"
-            
-            echo "修复1: 添加缺失的 import..."
-            # 检查是否已有 View 导入
-            if ! grep -q "import android.view.View" "$FILE"; then
-              # 在第一个 import 后添加
-              sed -i '/^import android\..*/{p;s/.*/import android.view.View/;}' "$FILE"
-              echo "添加了 import android.view.View"
-            fi
-            
-            echo "修复2: 修复 IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT..."
-            # 修复常量引用
-            sed -i 's/IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT/View.IMPORTANT_FOR_AUTOFILL_AUTO/g' "$FILE"
-            
-            echo "修复3: 修复 nextAutofillId()..."
-            # 将方法调用改为属性访问
-            sed -i 's/nextAutofillId()/nextAutofillId/g' "$FILE"
-            
-            echo "修复4: 修复 AutofillId? 类型不匹配..."
-            # 找到相关行并修复
-            LINE_NUM=$(grep -n "Type mismatch.*AutofillId" "$FILE" | cut -d: -f1)
-            if [ -n "$LINE_NUM" ]; then
-              echo "在第 $LINE_NUM 行发现类型不匹配"
-              # 在相关行添加 !! 强制转换或 ?: 处理
-              sed -i "${LINE_NUM}s/autofillId = /autofillId = /" "$FILE"
-              # 更安全的修复：添加空值检查
-              sed -i "${LINE_NUM}s/=/?: View.NO_AUTOFILL_ID/g" "$FILE" 2>/dev/null || true
-            fi
-            
-            echo "修复后的相关代码："
-            grep -n -B2 -A2 "IMPORTANT_FOR_AUTOFILL\|nextAutofillId\|AutofillId" "$FILE" | head -20
-            
-          else
-            echo "错误：未找到文件 $FILE"
-            exit 1
+          # 方法1: 直接修复代码
+          sed -i 's/IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT/View.IMPORTANT_FOR_AUTOFILL_NO/g' "$FILE"
+          sed -i 's/nextAutofillId()/nextAutofillId/g' "$FILE"
+          
+          # 方法2: 如果 View 未导入，添加导入
+          if ! grep -q "import android.view.View" "$FILE"; then
+            # 在文件开头添加
+            sed -i '1iimport android.view.View' "$FILE"
           fi
+          
+          # 方法3: 修复类型不匹配
+          sed -i 's/: AutofillId?/: AutofillId/g' "$FILE" 2>/dev/null || true
+          sed -i 's/autofillId: AutofillId?/autofillId: AutofillId/g' "$FILE" 2>/dev/null || true
+          
+          echo "修复完成"
       
-      - name: Fix JVM target compatibility
+      - name: Build
         run: |
-          echo "=== 修复 JVM 目标版本兼容性 ==="
-          
-          # 修改 build.gradle 确保 Java 和 Kotlin 使用相同的 JVM 版本
-          if [ -f "app/build.gradle" ]; then
-            echo "修复 app/build.gradle..."
-            
-            # 确保 compileOptions 设置正确
-            if ! grep -q "compileOptions" app/build.gradle; then
-              cat >> app/build.gradle << 'EOF'
-
-android {
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = '17'
-    }
-}
-EOF
-            else
-              # 更新现有的 compileOptions
-              sed -i 's/sourceCompatibility .*/sourceCompatibility JavaVersion.VERSION_17/g' app/build.gradle
-              sed -i 's/targetCompatibility .*/targetCompatibility JavaVersion.VERSION_17/g' app/build.gradle
-              
-              # 添加或更新 kotlinOptions
-              if grep -q "kotlinOptions" app/build.gradle; then
-                sed -i 's/jvmTarget = .*/jvmTarget = "17"/g' app/build.gradle
-              else
-                sed -i '/compileOptions/a\    kotlinOptions {\n        jvmTarget = "17"\n    }' app/build.gradle
-              fi
-            fi
-            
-            echo "修复后的相关配置："
-            grep -A5 -B5 "compileOptions\|kotlinOptions\|jvmTarget" app/build.gradle || true
-            
-          elif [ -f "app/build.gradle.kts" ]; then
-            echo "修复 app/build.gradle.kts..."
-            # 类似的修复用于 Kotlin DSL
-          fi
+          # 简单构建
+          ./gradlew assembleDebug --stacktrace
       
-      - name: Check and fix imports
-        run: |
-          echo "=== 检查并修复导入 ==="
-          
-          FILE="app/src/main/java/ddd/pwa/browser/WebViewActivity.kt"
-          
-          # 确保必要的导入存在
-          REQUIRED_IMPORTS=(
-            "import android.view.View"
-            "import android.view.autofill.AutofillId"
-            "import android.view.autofill.AutofillManager"
-          )
-          
-          for import_stmt in "${REQUIRED_IMPORTS[@]}"; do
-            if ! grep -q "$import_stmt" "$FILE"; then
-              echo "添加缺失的导入: $import_stmt"
-              # 在最后一个 import 后添加
-              sed -i "/^import .*/{x;p;x;h;d}; \$!b; x;/./{x;p;x;p;b}; x;/^$/d; s/.*/$import_stmt\n&/" "$FILE"
-            fi
-          done
-          
-          echo "当前导入："
-          grep "^import " "$FILE" | head -20
-      
-      - name: Alternative fix - comment problematic code
-        run: |
-          echo "=== 备用方案：注释问题代码 ==="
-          
-          FILE="app/src/main/java/ddd/pwa/browser/WebViewActivity.kt"
-          
-          # 如果之前修复失败，注释掉问题代码
-          if [ -f "$FILE" ]; then
-            # 注释掉问题行
-            sed -i '443s/^/\/\/ /' "$FILE"
-            sed -i '476s/^/\/\/ /' "$FILE"
-            
-            # 也注释掉使用这些值的行
-            sed -i '/importantForAutofill.*=/s/^/\/\/ /' "$FILE" 2>/dev/null || true
-            sed -i '/val autofillId.*=/s/^/\/\/ /' "$FILE" 2>/dev/null || true
-            
-            echo "已注释问题代码"
-          fi
-      
-      - name: Build with detailed logging
-        run: |
-          echo "=== 开始构建 ==="
-          
-          # 清理项目
-          ./gradlew clean
-          
-          # 详细构建
-          ./gradlew assembleDebug --stacktrace --info 2>&1 | tee build.log || true
-          
-          echo "=== 构建完成 ==="
-          
-          # 检查是否有 APK 生成
-          if find . -name "*.apk" -type f | grep -q .; then
-            echo "找到 APK 文件："
-            find . -name "*.apk" -type f
-          else
-            echo "未找到 APK 文件，查看错误："
-            grep -i "error\|fail\|exception" build.log | head -30
-          fi
-      
-      - name: Upload APK
+      - name: Upload result
         uses: actions/upload-artifact@v4
         with:
-          name: android-debug-apk
+          name: app-apk
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
-      
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: build.log
