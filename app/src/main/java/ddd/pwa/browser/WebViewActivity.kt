@@ -5,6 +5,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.app.ActivityManager.TaskDescription
+import android.app.assist.AssistStructure
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -15,11 +16,13 @@ import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
+import android.service.autofill.*
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup.MarginLayoutParams
-import android.view.autofill.AutofillManager // 新增导入
+import android.view.autofill.AutofillManager
+import android.view.autofill.AutofillValue
 import android.webkit.*
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -53,8 +56,21 @@ class WebViewActivity : AppCompatActivity() {
     private var isFull: Boolean = true
     var fullOK: Boolean = false
     var mFilePathCallback: ValueCallback<Array<Uri>>? = null
-    // 新增：声明 AutofillManager 变量
+    
+    // 自动填充相关
     private lateinit var autofillManager: AutofillManager
+    private var currentAutofillId: android.view.autofill.AutofillId? = null
+    
+    // 存储表单字段信息
+    data class FormField(
+        val autofillId: android.view.autofill.AutofillId,
+        val hint: String,
+        val htmlName: String,
+        val htmlId: String,
+        val type: Int
+    )
+    
+    private val formFields = mutableListOf<FormField>()
 
     val launcher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -101,10 +117,41 @@ class WebViewActivity : AppCompatActivity() {
         initializeServiceWorker()
         // 载入界面布局
         setContentView(R.layout.activity_web_view)
-        // 初始化 AutofillManager （新增）
-        autofillManager = getSystemService(AutofillManager::class.java)
+        // 初始化自动填充管理器
+        initializeAutofill()
         // 初始化webView
         initializeWebView()
+    }
+    
+    private fun initializeAutofill() {
+        // 获取AutofillManager实例
+        autofillManager = getSystemService(AutofillManager::class.java)!!
+        
+        // 检查自动填充服务是否可用
+        if (autofillManager.isEnabled) {
+            Log.d(mTAG, "系统自动填充服务已启用")
+            
+            // 设置自动填充回调
+            autofillManager.registerCallback(object : AutofillManager.AutofillCallback() {
+                override fun onAutofillEvent(view: View, event: Int) {
+                    when (event) {
+                        AutofillManager.AutofillCallback.EVENT_INPUT_HIDDEN -> {
+                            Log.d(mTAG, "自动填充输入隐藏")
+                        }
+                        AutofillManager.AutofillCallback.EVENT_INPUT_SHOWN -> {
+                            Log.d(mTAG, "自动填充输入显示")
+                        }
+                        AutofillManager.AutofillCallback.EVENT_INPUT_UNAVAILABLE -> {
+                            Log.d(mTAG, "自动填充输入不可用")
+                        }
+                    }
+                }
+            })
+        } else {
+            Log.w(mTAG, "系统自动填充服务未启用，请前往系统设置开启")
+            // 可以提示用户开启自动填充服务
+            Toast.makeText(this, "系统自动填充服务未启用，部分功能可能受限", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -391,6 +438,10 @@ class WebViewActivity : AppCompatActivity() {
         // settings.allowFileAccessFromFileURLs = true // 是否应允许在文件方案 URL 下运行的 JavaScript 访问来自其他文件方案 URL 的内容
         // settings.allowUniversalAccessFromFileURLs = true // 是否应允许在文件方案URL下运行的 JavaScript 访问任何来源的内容
         // myWebView.setDrawingCacheEnabled(true) // 启用或禁用图形缓存
+        
+        // 启用自动填充支持
+        myWebView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT
+        
         myWebView.webViewClient = WVViewClient(this, this@WebViewActivity) // 帮助 WebView 处理各种通知、请求事件
         myWebView.webChromeClient = WVChromeClient(this, this@WebViewActivity) // 处理解析，渲染网页
         myImageLogo.setOnClickListener {
@@ -405,17 +456,40 @@ class WebViewActivity : AppCompatActivity() {
         myWebView.loadUrl(hostUrl)
     }
 
-    // 新增：提交自动填充上下文的核心方法
+    // 提交自动填充上下文的核心方法
     fun commitAutofillContext(currentUrl: String?) {
         if (::autofillManager.isInitialized && autofillManager.isEnabled && !currentUrl.isNullOrBlank()) {
-            // 提交当前上下文。系统会自动收集 WebView 中的视图信息和当前 URL，
-            // 并将其传递给 Bitwarden 等自动填充服务。
+            // 提交当前上下文
             autofillManager.commit()
             Log.d(mTAG, "已为URL提交自动填充上下文: $currentUrl")
         } else {
             if (!autofillManager.isEnabled) {
                 Log.d(mTAG, "自动填充服务未启用")
             }
+        }
+    }
+    
+    // 注册表单字段到自动填充系统
+    fun registerFormField(htmlName: String, htmlId: String, hint: String, type: Int) {
+        if (::autofillManager.isInitialized && autofillManager.isEnabled) {
+            // 为WebView创建AutofillId
+            val autofillId = autofillManager.nextAutofillId()
+            
+            // 保存表单字段信息
+            val formField = FormField(autofillId, hint, htmlName, htmlId, type)
+            formFields.add(formField)
+            
+            Log.d(mTAG, "注册表单字段: $htmlName ($htmlId) - $hint - 类型: $type")
+            
+            // 通知自动填充管理器视图已准备就绪
+            autofillManager.notifyViewEntered(myWebView)
+        }
+    }
+    
+    // 请求自动填充数据
+    fun requestAutofill() {
+        if (::autofillManager.isInitialized && autofillManager.isEnabled) {
+            autofillManager.requestAutofill(myWebView)
         }
     }
 
@@ -508,7 +582,11 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
     //页面加载完成
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
-        // 核心新增：在页面加载完成时，提交当前URL的自动填充上下文
+        
+        // 核心新增：在页面加载完成时，注入JavaScript检测表单字段并注册到自动填充系统
+        injectAutofillDetectionScript(view)
+        
+        // 提交当前URL的自动填充上下文
         _m.commitAutofillContext(url)
 
         // 关闭logo图
@@ -560,6 +638,133 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
         // 如果不是普通的页面重载（例如是SPA路由切换），则提交新的自动填充上下文
         if (!isReload) {
             _m.commitAutofillContext(url)
+        }
+    }
+    
+    // 新增：注入JavaScript检测表单字段
+    private fun injectAutofillDetectionScript(view: WebView?) {
+        val detectionScript = """
+            (function() {
+                // 检测所有表单字段
+                function detectFormFields() {
+                    var fields = [];
+                    
+                    // 查找所有input元素
+                    var inputs = document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], input[type="tel"], input[type="number"]');
+                    inputs.forEach(function(input) {
+                        var fieldInfo = {
+                            id: input.id || '',
+                            name: input.name || '',
+                            type: input.type,
+                            placeholder: input.placeholder || '',
+                            autocomplete: input.getAttribute('autocomplete') || ''
+                        };
+                        fields.push(fieldInfo);
+                    });
+                    
+                    // 返回字段信息
+                    return JSON.stringify(fields);
+                }
+                
+                // 监听表单字段焦点事件
+                document.addEventListener('focus', function(e) {
+                    if (e.target.tagName === 'INPUT') {
+                        var input = e.target;
+                        var fieldInfo = {
+                            id: input.id || '',
+                            name: input.name || '',
+                            type: input.type,
+                            placeholder: input.placeholder || '',
+                            autocomplete: input.getAttribute('autocomplete') || ''
+                        };
+                        
+                        // 通知Android端有表单字段获得焦点
+                        if (window.AndroidWebView && typeof window.AndroidWebView.onFormFieldFocused === 'function') {
+                            window.AndroidWebView.onFormFieldFocused(JSON.stringify(fieldInfo));
+                        }
+                    }
+                }, true);
+                
+                // 初始检测
+                setTimeout(function() {
+                    var fields = detectFormFields();
+                    if (window.AndroidWebView && typeof window.AndroidWebView.onFormFieldsDetected === 'function') {
+                        window.AndroidWebView.onFormFieldsDetected(fields);
+                    }
+                }, 1000);
+                
+                // 监听DOM变化（用于SPA）
+                var observer = new MutationObserver(function(mutations) {
+                    setTimeout(function() {
+                        var fields = detectFormFields();
+                        if (window.AndroidWebView && typeof window.AndroidWebView.onFormFieldsDetected === 'function') {
+                            window.AndroidWebView.onFormFieldsDetected(fields);
+                        }
+                    }, 500);
+                });
+                
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true
+                });
+                
+                // 创建AndroidWebView对象用于JavaScript与Android通信
+                if (!window.AndroidWebView) {
+                    window.AndroidWebView = {
+                        onFormFieldsDetected: function(fieldsJson) {
+                            // 这个函数会被Android端覆盖
+                        },
+                        onFormFieldFocused: function(fieldJson) {
+                            // 这个函数会被Android端覆盖
+                        }
+                    };
+                }
+                
+                // 监听表单提交
+                var forms = document.querySelectorAll('form');
+                forms.forEach(function(form) {
+                    form.addEventListener('submit', function() {
+                        if (window.AndroidWebView && typeof window.AndroidWebView.onFormSubmitted === 'function') {
+                            window.AndroidWebView.onFormSubmitted();
+                        }
+                    });
+                });
+            })();
+        """.trimIndent()
+        
+        view?.evaluateJavascript(detectionScript) { result ->
+            Log.d(_m.mTAG, "已注入自动填充检测脚本")
+            
+            // 设置JavaScript接口
+            view.addJavascriptInterface(object {
+                @JavascriptInterface
+                fun onFormFieldsDetected(fieldsJson: String) {
+                    try {
+                        Log.d(_m.mTAG, "检测到表单字段: $fieldsJson")
+                        // 这里可以解析JSON并注册表单字段到自动填充系统
+                    } catch (e: Exception) {
+                        Log.e(_m.mTAG, "解析表单字段失败", e)
+                    }
+                }
+                
+                @JavascriptInterface
+                fun onFormFieldFocused(fieldJson: String) {
+                    try {
+                        Log.d(_m.mTAG, "表单字段获得焦点: $fieldJson")
+                        // 字段获得焦点时，可以请求自动填充
+                        _m.requestAutofill()
+                    } catch (e: Exception) {
+                        Log.e(_m.mTAG, "处理字段焦点失败", e)
+                    }
+                }
+                
+                @JavascriptInterface
+                fun onFormSubmitted() {
+                    Log.d(_m.mTAG, "表单已提交")
+                    // 表单提交后，可以通知自动填充系统保存数据
+                    _m.commitAutofillContext(view.url)
+                }
+            }, "AndroidWebView")
         }
     }
 }
