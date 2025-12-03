@@ -14,6 +14,7 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.net.http.SslError
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
@@ -341,7 +342,14 @@ class WebViewActivity : AppCompatActivity() {
         settings.builtInZoomControls = true
         settings.displayZoomControls = false
         
-        myWebView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT
+        // 兼容不同版本的自动填充API
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // API 26+ 使用新的常量
+            myWebView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
+        } else {
+            // 旧版本不支持自动填充
+            Log.w(mTAG, "当前Android版本不支持自动填充API")
+        }
         
         myWebView.webViewClient = WVViewClient(this, this@WebViewActivity)
         myWebView.webChromeClient = WVChromeClient(this, this@WebViewActivity)
@@ -355,10 +363,15 @@ class WebViewActivity : AppCompatActivity() {
         myWebView.loadUrl(hostUrl)
     }
 
+    // 提交自动填充上下文
     fun commitAutofillContext(currentUrl: String?) {
         if (::autofillManager.isInitialized && autofillManager.isEnabled && !currentUrl.isNullOrBlank()) {
-            autofillManager.commit()
-            Log.d(mTAG, "已为URL提交自动填充上下文: $currentUrl")
+            try {
+                autofillManager.commit()
+                Log.d(mTAG, "已为URL提交自动填充上下文: $currentUrl")
+            } catch (e: Exception) {
+                Log.e(mTAG, "提交自动填充上下文失败", e)
+            }
         } else {
             if (!autofillManager.isEnabled) {
                 Log.d(mTAG, "自动填充服务未启用")
@@ -444,6 +457,8 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
 
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
+        
+        // 提交自动填充上下文
         _m.commitAutofillContext(url)
 
         if (_m.firstUpdated) {
