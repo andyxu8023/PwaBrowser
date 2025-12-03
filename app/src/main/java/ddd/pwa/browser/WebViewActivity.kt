@@ -5,7 +5,6 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.app.ActivityManager.TaskDescription
-import android.app.assist.AssistStructure
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -16,13 +15,11 @@ import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
-import android.service.autofill.*
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup.MarginLayoutParams
 import android.view.autofill.AutofillManager
-import android.view.autofill.AutofillValue
 import android.webkit.*
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -35,7 +32,6 @@ import java.io.*
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.*
-
 
 class WebViewActivity : AppCompatActivity() {
     val mTAG: String = "WebViewActivity"
@@ -56,41 +52,22 @@ class WebViewActivity : AppCompatActivity() {
     private var isFull: Boolean = true
     var fullOK: Boolean = false
     var mFilePathCallback: ValueCallback<Array<Uri>>? = null
-    
-    // 自动填充相关
     private lateinit var autofillManager: AutofillManager
-    private var currentAutofillId: android.view.autofill.AutofillId? = null
-    
-    // 存储表单字段信息
-    data class FormField(
-        val autofillId: android.view.autofill.AutofillId,
-        val hint: String,
-        val htmlName: String,
-        val htmlId: String,
-        val type: Int
-    )
-    
-    private val formFields = mutableListOf<FormField>()
 
     val launcher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result: ActivityResult ->
         if (result.resultCode == RESULT_OK && result.data != null) {
-            // 获取选择的文件URI
             val data = if (result.data != null) arrayOf(result.data!!.data!!) else emptyArray()
             Log.e(mTAG, "获取选择的文件: $data")
-            // 调用回调函数，将选择的文件URI传递给WebView
             mFilePathCallback?.onReceiveValue(data)
         } else {
-            // 用户取消选择文件，将回调函数置为null
             mFilePathCallback?.onReceiveValue(null)
         }
-        // 重置回调函数和参数
         mFilePathCallback = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 获取传递过来的网址
         val url = intent.getStringExtra("url")
         mode = intent.getIntExtra("mode", LAUNCH_MODE.SHOW_URL_PAGE.intValue)
         name = intent.getStringExtra("name") ?: "沉浸浏览"
@@ -101,61 +78,23 @@ class WebViewActivity : AppCompatActivity() {
             finish()
             return
         } else {
-            // 绑定url地址
             hostUrl = url
         }
-        // 初始化配置
+        
         mySharedPreferences = getSharedPreferences("mySharedPreferences", MODE_PRIVATE)
         val parsedUrl = URL(url)
-        bgColor = mySharedPreferences.getInt("${parsedUrl.host}:${parsedUrl.port}bg_color", ContextCompat.getColor(this, R.color.logo_bg))
-        // 设置背景色和状态栏颜色
+        bgColor = mySharedPreferences.getInt("${parsedUrl.host}:${parsedUrl.port}bg_color", 
+            ContextCompat.getColor(this, R.color.logo_bg))
         setActivityColor()
-        // 获取缓存的图标
         logo = getBitmapFromCache()
         super.onCreate(savedInstanceState)
-        // 初始化ServiceWorker拦截
         initializeServiceWorker()
-        // 载入界面布局
         setContentView(R.layout.activity_web_view)
-        // 初始化自动填充管理器
-        initializeAutofill()
-        // 初始化webView
+        autofillManager = getSystemService(AutofillManager::class.java)
         initializeWebView()
-    }
-    
-    private fun initializeAutofill() {
-        // 获取AutofillManager实例
-        autofillManager = getSystemService(AutofillManager::class.java)!!
-        
-        // 检查自动填充服务是否可用
-        if (autofillManager.isEnabled) {
-            Log.d(mTAG, "系统自动填充服务已启用")
-            
-            // 设置自动填充回调
-            autofillManager.registerCallback(object : AutofillManager.AutofillCallback() {
-                override fun onAutofillEvent(view: View, event: Int) {
-                    when (event) {
-                        AutofillManager.AutofillCallback.EVENT_INPUT_HIDDEN -> {
-                            Log.d(mTAG, "自动填充输入隐藏")
-                        }
-                        AutofillManager.AutofillCallback.EVENT_INPUT_SHOWN -> {
-                            Log.d(mTAG, "自动填充输入显示")
-                        }
-                        AutofillManager.AutofillCallback.EVENT_INPUT_UNAVAILABLE -> {
-                            Log.d(mTAG, "自动填充输入不可用")
-                        }
-                    }
-                }
-            })
-        } else {
-            Log.w(mTAG, "系统自动填充服务未启用，请前往系统设置开启")
-            // 可以提示用户开启自动填充服务
-            Toast.makeText(this, "系统自动填充服务未启用，部分功能可能受限", Toast.LENGTH_SHORT).show()
-        }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        // 浏览器后退
         if (keyCode == KeyEvent.KEYCODE_BACK && myWebView.canGoBack()) {
             myWebView.goBack()
             return true
@@ -176,7 +115,8 @@ class WebViewActivity : AppCompatActivity() {
                 setResult(RESULT_OK, resultIntent)
                 finish()
             } else {
-                @Suppress("DEPRECATION") val taskDescription = TaskDescription(name, logo)
+                @Suppress("DEPRECATION") 
+                val taskDescription = TaskDescription(name, logo)
                 setTaskDescription(taskDescription)
             }
         }
@@ -189,23 +129,17 @@ class WebViewActivity : AppCompatActivity() {
     }
 
     fun hideBgLogo() {
-        // 隐藏logo界面
         val logo: LinearLayout = findViewById(R.id.bg_logo)
-        if (mode  == LAUNCH_MODE.GET_URL_DETAIL.intValue) {
+        if (mode == LAUNCH_MODE.GET_URL_DETAIL.intValue) {
             logo.visibility = View.GONE
         } else {
-            // 创建一个透明度动画
             val alphaAnimation = ObjectAnimator.ofFloat(logo, "alpha", 1.0f, 0.0f)
-            // 设置动画持续时间
             alphaAnimation.duration = 1000
-            // 添加动画监听器
             alphaAnimation.addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    // 动画结束时隐藏 LinearLayout
                     logo.visibility = View.GONE
                 }
             })
-            // 开始动画
             alphaAnimation.start()
         }
     }
@@ -233,7 +167,6 @@ class WebViewActivity : AppCompatActivity() {
     fun convertColorString(colorString: String): String {
         var convertedColorString = colorString.trim('"', '\'').lowercase(Locale.ROOT)
         if (convertedColorString.startsWith("#")) {
-            // 如果颜色值以 # 开头，则直接返回该值
             return convertedColorString
         }
         if (convertedColorString.startsWith("rgba")) {
@@ -243,7 +176,6 @@ class WebViewActivity : AppCompatActivity() {
             val hexValues = rgbaValues.subList(0, 3).map { String.format("%02X", it.toInt()) }
             convertedColorString = "#${String.format("%02X", alpha)}${hexValues.joinToString("")}"
         } else if (convertedColorString.startsWith("rgb")) {
-            // 如果颜色值以 rgb 开头，则将其转换为 #RRGGBB 格式的颜色值
             val matchResult = Regex("""\d+""").findAll(convertedColorString)
             val rgbValues = matchResult.map { it.value.toInt() }.toList()
             val hexValues = rgbValues.map { String.format("%02X", it) }
@@ -281,12 +213,10 @@ class WebViewActivity : AppCompatActivity() {
         return convertedColorString
     }
 
-    // 编码字符串为Base64字符串
     private fun encode(data: String): String {
         return Base64.getEncoder().encodeToString(data.toByteArray())
     }
 
-    // 解码Base64字符串为字符串
     @Suppress("unused")
     private fun decode(base64: String): String {
         return String(Base64.getDecoder().decode(base64))
@@ -297,15 +227,10 @@ class WebViewActivity : AppCompatActivity() {
             return
         }
         try {
-            // 获取缓存目录
             val cacheDir = cacheDir
-            // 创建文件对象
             val file = File(cacheDir, encode(hostUrl))
-            // 创建文件输出流对象
             val fos = FileOutputStream(file)
-            // 将Bitmap对象压缩为PNG格式并写入文件输出流
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
-            // 关闭文件输出流
             fos.close()
         } catch (e: IOException) {
             e.printStackTrace()
@@ -314,17 +239,11 @@ class WebViewActivity : AppCompatActivity() {
 
     private fun getBitmapFromCache(): Bitmap? {
         try {
-            // 获取缓存目录
             val cacheDir = cacheDir
-            // 创建文件对象
             val file = File(cacheDir, encode(hostUrl))
-            // 创建文件输入流对象
             val fis = FileInputStream(file)
-            // 将文件输入流解码为Bitmap对象
             val bitmap = BitmapFactory.decodeStream(fis)
-            // 关闭文件输入流
             fis.close()
-            // 返回Bitmap对象
             return bitmap
         } catch (e: IOException) {
             e.printStackTrace()
@@ -334,9 +253,7 @@ class WebViewActivity : AppCompatActivity() {
 
     fun replaceCss(request: WebResourceRequest): WebResourceResponse? {
         val url = request.url.toString()
-        // 判断是否为CSS文件
         if (url.endsWith(".css")) {
-            // 获取原始CSS文件的输入流
             val inputStream: InputStream?
             try {
                 val connection: HttpURLConnection =
@@ -346,20 +263,15 @@ class WebViewActivity : AppCompatActivity() {
                 e.printStackTrace()
                 return null
             }
-            // 将输入流转换为字符串，并进行相应的替换操作
             var cssString = convertStreamToString(inputStream!!)
-            // 如果存在IOS的安全边距
             val safe = "env(safe-area-inset-top)"
             if (cssString.indexOf(safe) > -1) {
-                // 将IOS的安全边距进行替换
                 cssString = cssString.replace(safe, "" + statusBarHeight + "px")
                 Log.w(
                     mTAG,
                     "replaceCss, 替换成功: " + request.isForMainFrame + ": " + request.url
                 )
             }
-
-            // 返回新的WebResourceResponse对象，以替换原始的CSS文件
             return WebResourceResponse(
                 "text/css",
                 "UTF-8",
@@ -370,9 +282,7 @@ class WebViewActivity : AppCompatActivity() {
     }
 
     fun setActivityColor() {
-        // 设置窗口的背景色
         window.setBackgroundDrawable(ColorDrawable(bgColor))
-        // 设置状态栏的颜色
         val isLight = Color.red(bgColor) * 0.299 + Color.green(bgColor) * 0.587 + Color.blue(bgColor) * 0.114 >= 186
         if (isLight) {
             @Suppress("DEPRECATION")
@@ -384,7 +294,6 @@ class WebViewActivity : AppCompatActivity() {
     }
 
     private fun initializeServiceWorker() {
-        // 配置 Service Worker 拦截
         val swController = ServiceWorkerController.getInstance()
         swController.serviceWorkerWebSettings.allowContentAccess = true
         swController.setServiceWorkerClient(object : ServiceWorkerClient() {
@@ -405,7 +314,6 @@ class WebViewActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun initializeWebView() {
-        // 绑定组件 应用背景色和图标
         myWebView = findViewById(R.id.webview_ding)
         myWebView.setBackgroundColor(bgColor)
         if (!isFull) {
@@ -419,47 +327,36 @@ class WebViewActivity : AppCompatActivity() {
             myImageLogo.setImageBitmap(logo)
         }
 
-        // 配置 web view
         WebView.setWebContentsDebuggingEnabled(true)
-        val settings: WebSettings = myWebView.settings // webView 配置项
+        val settings: WebSettings = myWebView.settings
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-        settings.useWideViewPort = true // 是否启用对视口元标记的支持
-        settings.javaScriptEnabled = true // 是否启用 JavaScript
-        settings.domStorageEnabled = true // 是否启用本地存储（允许使用 localStorage 等）—— 对自动填充很重要
-        settings.allowFileAccess = true // 是否启用文件访问
-        // val appCachePath = applicationContext.cacheDir.absolutePath // 缓存地址
-        settings.allowContentAccess = true // 是否启用内容 URL 访问
-        settings.javaScriptCanOpenWindowsAutomatically = true // 是否允许 JS 弹窗
-        settings.mediaPlaybackRequiresUserGesture = false // 是否需要用户手势来播放媒体
-        settings.loadWithOverviewMode = true // 是否以概览模式加载页面，即按宽度缩小内容以适应屏幕
-        settings.builtInZoomControls = true // 是否应使用其内置的缩放机制
-        // Hide the zoom controls for HONEYCOMB+
-        settings.displayZoomControls = false  // 是否应显示屏幕缩放控件
-        // settings.allowFileAccessFromFileURLs = true // 是否应允许在文件方案 URL 下运行的 JavaScript 访问来自其他文件方案 URL 的内容
-        // settings.allowUniversalAccessFromFileURLs = true // 是否应允许在文件方案URL下运行的 JavaScript 访问任何来源的内容
-        // myWebView.setDrawingCacheEnabled(true) // 启用或禁用图形缓存
+        settings.useWideViewPort = true
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.allowFileAccess = true
+        settings.allowContentAccess = true
+        settings.javaScriptCanOpenWindowsAutomatically = true
+        settings.mediaPlaybackRequiresUserGesture = false
+        settings.loadWithOverviewMode = true
+        settings.builtInZoomControls = true
+        settings.displayZoomControls = false
         
-        // 启用自动填充支持
         myWebView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES_AUTO_DETECT
         
-        myWebView.webViewClient = WVViewClient(this, this@WebViewActivity) // 帮助 WebView 处理各种通知、请求事件
-        myWebView.webChromeClient = WVChromeClient(this, this@WebViewActivity) // 处理解析，渲染网页
+        myWebView.webViewClient = WVViewClient(this, this@WebViewActivity)
+        myWebView.webChromeClient = WVChromeClient(this, this@WebViewActivity)
         myImageLogo.setOnClickListener {
-            // 当长时间无法载入时, 可通过点击图标强制刷新
             myWebView.stopLoading()
             myWebView.clearCache(true)
             myWebView.loadUrl(hostUrl)
             Toast.makeText(applicationContext,"正在刷新..", Toast.LENGTH_SHORT).show()
         }
 
-//        settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
         myWebView.loadUrl(hostUrl)
     }
 
-    // 提交自动填充上下文的核心方法
     fun commitAutofillContext(currentUrl: String?) {
         if (::autofillManager.isInitialized && autofillManager.isEnabled && !currentUrl.isNullOrBlank()) {
-            // 提交当前上下文
             autofillManager.commit()
             Log.d(mTAG, "已为URL提交自动填充上下文: $currentUrl")
         } else {
@@ -468,30 +365,6 @@ class WebViewActivity : AppCompatActivity() {
             }
         }
     }
-    
-    // 注册表单字段到自动填充系统
-    fun registerFormField(htmlName: String, htmlId: String, hint: String, type: Int) {
-        if (::autofillManager.isInitialized && autofillManager.isEnabled) {
-            // 为WebView创建AutofillId - 修复：使用!!确保非空
-            val autofillId = autofillManager.nextAutofillId()!!
-            
-            // 保存表单字段信息
-            val formField = FormField(autofillId, hint, htmlName, htmlId, type)
-            formFields.add(formField)
-            
-            Log.d(mTAG, "注册表单字段: $htmlName ($htmlId) - $hint - 类型: $type")
-            
-            autofillManager.notifyViewEntered(myWebView as android.view.View)
-        }
-    }
-    
-    // 请求自动填充数据
-    fun requestAutofill() {
-        if (::autofillManager.isInitialized && autofillManager.isEnabled) {
-            autofillManager.requestAutofill(myWebView as View)
-        }
-    }
-
 }
 
 @Suppress("unused")
@@ -520,16 +393,11 @@ private class WVChromeClient(private val _context: Context, private val _m: WebV
         filePathCallback: ValueCallback<Array<Uri>>?,
         fileChooserParams: FileChooserParams?
     ): Boolean {
-        // 创建Intent，用于打开文件选择器
         val intent = fileChooserParams?.createIntent()
-        // 启动文件选择器
         _m.launcher.launch(intent)
-        // 保存回调函数，以便在选择文件后调用
         _m.mFilePathCallback = filePathCallback
         return true
     }
-
-
 }
 
 private class WVViewClient(private val _context: Context, private val _m: WebViewActivity):
@@ -539,10 +407,8 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
         handler.proceed()
     }
 
-    // 非hostUrl从外部浏览器打开
     @Deprecated("Deprecated in Java")
     override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-        // 1.6.2版本moviePilot 新增新窗口打开日志页面, 在深色模式下, 浏览效果不佳, 因此增加判断从外部浏览器打开
         if (Uri.parse(url).host?.let { _m.hostUrl.indexOf(it) }!! > -1 &&
             Uri.parse(url).path?.matches(Regex(".*/api/v\\d+/system/logging$")) != true) {
             return false
@@ -555,10 +421,8 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
         return true
     }
 
-    //页面访问出错
     override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
         super.onReceivedError(view, request, error)
-        // 未加载成功 禁止关闭logo图
         _m.firstUpdated = false
     }
 
@@ -578,22 +442,15 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
         }
     }
 
-    //页面加载完成
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
-        
-        // 核心新增：在页面加载完成时，注入JavaScript检测表单字段并注册到自动填充系统
-        injectAutofillDetectionScript(view)
-        
-        // 提交当前URL的自动填充上下文
         _m.commitAutofillContext(url)
 
-        // 关闭logo图
         if (_m.firstUpdated) {
             _m.firstUpdated = false
             _m.hideBgLogo()
         }
-        // 使用JavaScript获取网站的背景颜色
+        
         var js = "javascript:window.getComputedStyle(document.body).backgroundColor;"
         view?.evaluateJavascript(js) { result ->
             val newResult = _m.convertColorString(result)
@@ -608,6 +465,7 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
             _m.bgColorOK = true
             _m.returnMain()
         }
+        
         js = "javascript:(function() {" +
                 "var metas = document.getElementsByTagName('meta');" +
                     "for (var i = 0; i < metas.length; i++) {" +
@@ -620,7 +478,7 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
                     "}" +
                 "return false;" +
                 "})()"
-        // 在页面加载完成后执行JavaScript代码检查viewport的meta标签
+                
         view?.evaluateJavascript(js) { result ->
             Log.e(_m.mTAG, "onPageFinished: result")
             _m.fullOK = true
@@ -631,142 +489,10 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
         }
     }
 
-    // 新增：处理单页应用(SPA)的URL变化
     override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
         super.doUpdateVisitedHistory(view, url, isReload)
-        // 如果不是普通的页面重载（例如是SPA路由切换），则提交新的自动填充上下文
         if (!isReload) {
             _m.commitAutofillContext(url)
-        }
-    }
-    
-    // 新增：注入JavaScript检测表单字段
-    private fun injectAutofillDetectionScript(view: WebView?) {
-        val detectionScript = """
-            (function() {
-                // 检测所有表单字段
-                function detectFormFields() {
-                    var fields = [];
-                    
-                    // 查找所有input元素
-                    var inputs = document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], input[type="tel"], input[type="number"]');
-                    inputs.forEach(function(input) {
-                        var fieldInfo = {
-                            id: input.id || '',
-                            name: input.name || '',
-                            type: input.type,
-                            placeholder: input.placeholder || '',
-                            autocomplete: input.getAttribute('autocomplete') || ''
-                        };
-                        fields.push(fieldInfo);
-                    });
-                    
-                    // 返回字段信息
-                    return JSON.stringify(fields);
-                }
-                
-                // 监听表单字段焦点事件
-                document.addEventListener('focus', function(e) {
-                    if (e.target.tagName === 'INPUT') {
-                        var input = e.target;
-                        var fieldInfo = {
-                            id: input.id || '',
-                            name: input.name || '',
-                            type: input.type,
-                            placeholder: input.placeholder || '',
-                            autocomplete: input.getAttribute('autocomplete') || ''
-                        };
-                        
-                        // 通知Android端有表单字段获得焦点
-                        if (window.AndroidWebView && typeof window.AndroidWebView.onFormFieldFocused === 'function') {
-                            window.AndroidWebView.onFormFieldFocused(JSON.stringify(fieldInfo));
-                        }
-                    }
-                }, true);
-                
-                // 初始检测
-                setTimeout(function() {
-                    var fields = detectFormFields();
-                    if (window.AndroidWebView && typeof window.AndroidWebView.onFormFieldsDetected === 'function') {
-                        window.AndroidWebView.onFormFieldsDetected(fields);
-                    }
-                }, 1000);
-                
-                // 监听DOM变化（用于SPA）
-                var observer = new MutationObserver(function(mutations) {
-                    setTimeout(function() {
-                        var fields = detectFormFields();
-                        if (window.AndroidWebView && typeof window.AndroidWebView.onFormFieldsDetected === 'function') {
-                            window.AndroidWebView.onFormFieldsDetected(fields);
-                        }
-                    }, 500);
-                });
-                
-                observer.observe(document.body, {
-                    childList: true,
-                    subtree: true
-                });
-                
-                // 创建AndroidWebView对象用于JavaScript与Android通信
-                if (!window.AndroidWebView) {
-                    window.AndroidWebView = {
-                        onFormFieldsDetected: function(fieldsJson) {
-                            // 这个函数会被Android端覆盖
-                        },
-                        onFormFieldFocused: function(fieldJson) {
-                            // 这个函数会被Android端覆盖
-                        },
-                        onFormSubmitted: function() {
-                            // 这个函数会被Android端覆盖
-                        }
-                    };
-                }
-                
-                // 监听表单提交
-                var forms = document.querySelectorAll('form');
-                forms.forEach(function(form) {
-                    form.addEventListener('submit', function() {
-                        if (window.AndroidWebView && typeof window.AndroidWebView.onFormSubmitted === 'function') {
-                            window.AndroidWebView.onFormSubmitted();
-                        }
-                    });
-                });
-            })();
-        """.trimIndent()
-        
-        view?.evaluateJavascript(detectionScript) { result ->
-            Log.d(_m.mTAG, "已注入自动填充检测脚本")
-            
-            // 设置JavaScript接口
-            view.addJavascriptInterface(object {
-                @JavascriptInterface
-                fun onFormFieldsDetected(fieldsJson: String) {
-                    try {
-                        Log.d(_m.mTAG, "检测到表单字段: $fieldsJson")
-                        // 这里可以解析JSON并注册表单字段到自动填充系统
-                    } catch (e: Exception) {
-                        Log.e(_m.mTAG, "解析表单字段失败", e)
-                    }
-                }
-                
-                @JavascriptInterface
-                fun onFormFieldFocused(fieldJson: String) {
-                    try {
-                        Log.d(_m.mTAG, "表单字段获得焦点: $fieldJson")
-                        // 字段获得焦点时，可以请求自动填充
-                        _m.requestAutofill()
-                    } catch (e: Exception) {
-                        Log.e(_m.mTAG, "处理字段焦点失败", e)
-                    }
-                }
-                
-                @JavascriptInterface
-                fun onFormSubmitted() {
-                    Log.d(_m.mTAG, "表单已提交")
-                    // 表单提交后，可以通知自动填充系统保存数据
-                    _m.commitAutofillContext(view.url)
-                }
-            }, "AndroidWebView")
         }
     }
 }
