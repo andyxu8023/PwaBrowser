@@ -472,8 +472,8 @@ class WebViewActivity : AppCompatActivity() {
     // 注册表单字段到自动填充系统
     fun registerFormField(htmlName: String, htmlId: String, hint: String, type: Int) {
         if (::autofillManager.isInitialized && autofillManager.isEnabled) {
-            // 为WebView创建AutofillId
-            val autofillId = autofillManager.nextAutofillId()
+            // 为WebView创建AutofillId - 修复：使用!!确保非空
+            val autofillId = autofillManager.nextAutofillId()!!
             
             // 保存表单字段信息
             val formField = FormField(autofillId, hint, htmlName, htmlId, type)
@@ -481,15 +481,15 @@ class WebViewActivity : AppCompatActivity() {
             
             Log.d(mTAG, "注册表单字段: $htmlName ($htmlId) - $hint - 类型: $type")
             
-            // 通知自动填充管理器视图已准备就绪
-            autofillManager.notifyViewEntered(myWebView)
+            // 通知自动填充管理器视图已准备就绪 - 修复：添加类型转换
+            autofillManager.notifyViewEntered(myWebView as View)
         }
     }
     
     // 请求自动填充数据
     fun requestAutofill() {
         if (::autofillManager.isInitialized && autofillManager.isEnabled) {
-            autofillManager.requestAutofill(myWebView)
+            autofillManager.requestAutofill(myWebView as View)
         }
     }
 
@@ -715,6 +715,9 @@ private class WVViewClient(private val _context: Context, private val _m: WebVie
                             // 这个函数会被Android端覆盖
                         },
                         onFormFieldFocused: function(fieldJson) {
+                            // 这个函数会被Android端覆盖
+                        },
+                        onFormSubmitted: function() {
                             // 这个函数会被Android端覆盖
                         }
                     };
