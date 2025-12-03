@@ -481,8 +481,7 @@ class WebViewActivity : AppCompatActivity() {
             
             Log.d(mTAG, "注册表单字段: $htmlName ($htmlId) - $hint - 类型: $type")
             
-            // 通知自动填充管理器视图已准备就绪 - 修复：添加类型转换
-            autofillManager.notifyViewEntered(myWebView as View)
+            autofillManager.notifyViewEntered(myWebView as android.view.View)
         }
     }
     
