@@ -66,14 +66,7 @@ jobs:
           java-version: '11'
           distribution: 'temurin'
 
-      # 获取打包秘钥
-      # 更新：使用 checkout@v4
-      - name: Checkout Android Keystore
-        uses: actions/checkout@v4
-        with:
-          repository: cikezhu/android-keystore
-          token: ${{ secrets.TOKEN }}
-          path: keystore
+
 
       # 获取上一次的TAG
       - name: Get commit messages
@@ -109,7 +102,7 @@ jobs:
 
       # 打包release
       - name: Build with Gradle
-        run: bash ./gradlew assembleRelease
+        run: bash ./gradlew assembleDebug
 
       # 创建release - 更新到现代方法
       - name: Create Release
